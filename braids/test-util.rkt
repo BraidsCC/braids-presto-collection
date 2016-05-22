@@ -28,6 +28,10 @@
     (add2 val) (number? . -> . number?)
     (add1 (add1 val))
     );dpco
+
+  (define-syntax-case/provide (add1-macro stx)
+    [(_ expr)
+     #`(add1 expr)])
   
   );/module
 
@@ -39,5 +43,7 @@
 ;(define t1 (test-struct-type 42 20))  ; fails
 
 (define/provide s4 (test-struct-type4 5 #f '(1 2) (make-hash)))
+
+(add1-macro 3)
 
 "Unless you see errors above, the tests most likely passed.  Most of them are syntactic, anyway."

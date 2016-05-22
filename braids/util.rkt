@@ -8,12 +8,75 @@
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Procedures needed by syntax-extensions.
+;; Macros for macros.
+
+
+;; Convenience macro for define-syntax with provide.
+;;
+;; Syntax:  
+;; (define-syntax-case/provide (head args) body ...+)
+;;
+;; Example:
+;;(define-syntax/provide (guilty-set! stx)
+;;  (syntax-case stx ()
+;;    [(_ id val)
+;;     (begin
+;;       (display "You have deviated from the One Truth Path by using (set! ")
+;;       (display (quote id))
+;;       (display ")\n")
+;;       (syntax/loc stx
+;;         (set! id val))
+;;       )]))
+(provide define-syntax/provide)
+(define-syntax (define-syntax/provide dsp-stx)  ;; Needs to be defined first.
+  ;;;;;;;;;;;;  ---------------------
+  (syntax-case dsp-stx ()
+    [(_ (rator stx0) body0 bodyN ...)
+     #`(begin
+         (provide rator)
+         (define-syntax (rator stx0)
+           body0 bodyN ...
+           )
+         )]))
+
+
+;; this is EXPERIMENTAL ... and broken.  :(
+;; Convenience macro for define-syntax containing a syntax-case with a provide form.
+;;
+;; Syntax:  
+;; (define-syntax-case/provide (head args)
+;;   clause ...)
+;;
+;; Example:
+;; (define-syntax-case/provide (guilty-set! stx)
+;;   [(_ id val)
+;;    (begin
+;;      (syntax/loc stx  ;; consumer-oriented error reporting
+;;        (let ()
+;;          (set! id val)
+;;          "You have deviated from the One Truth Path by using set!")))])
+(provide define-syntax-case/provide)
+(define-syntax (define-syntax-case/provide dscmp-stx)
+  ;;;;;;;;;;;;  --------------------------
+
+  ;; one macro to rule all macros...
+  (syntax-case dscmp-stx ()
+    [(_ (rator stx0) match0 matchN ...)
+     #`(define-syntax/provide (rator stx0)
+         #,(syntax/loc dscmp-stx  ; use the outer macro's syntax/loc.
+             (syntax-case stx0 ()
+               match0 matchN ...
+               )))]))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Macros and procedures.
 
 
 ;; Despite the name, this doesn't actually mutate the list.
 ;;
 (define-for-syntax (omit-second-item-of-each-sublist ls)
+  ;;;;;;;;;;;;;;;;  --------------------------------
   (cond
     [(eq? '() ls)
      '()]
@@ -29,8 +92,8 @@
 ;; Returns a syntax object that represents the srcloc (source location) of
 ;; another (given) syntax object, using the original syntax-context of the
 ;; given syntax object.
-(provide syntax->srcloc->syntax)
-(define (syntax->srcloc->syntax stx)
+(define (syntax->srcloc->syntax-@DEPRECATED stx)
+  ;;;;;  ----------------------------------
   (datum->syntax stx
    (srcloc (syntax-source stx)
            (syntax-line stx)
@@ -41,6 +104,7 @@
 ;; Despite the name, this doesn't actually mutate the list.
 ;;
 (define-for-syntax (truncate-sublists-to-two-items ls)
+  ;;;;;;;;;;;;;;;;  ------------------------------
   (cond
     [(eq? '() ls)
      '()]
@@ -70,21 +134,23 @@
 ;;
 ;; displays "yay".
 ;;
-(define-syntax (add1! stx)
-  ;;;;;;;;;;;;
+;(provide add1!)
+(define-syntax/provide (add1! stx)
+;(define-syntax (add1! stx)
+  ;;;;;;;;;;;;  -----
   (syntax-case stx ()
     [(_ num-var)
      #'(let () (set! num-var (add1 num-var)) num-var)     
      ]))
-(provide add1!)
 
 
 ;; Combine define and provide for procedures.
 ;; Syntax is intentionally identical to define for most purposes, including
 ;; values (aka exprs) and procedures.
 ;;
+(provide define/provide)
 (define-syntax (define/provide stx)
-  ;;;;;;;;;;;;
+  ;;;;;;;;;;;;  --------------
  (syntax-case stx ()
    [(_ (rator rands ...) body0 bodyN ...)
     #'(begin
@@ -95,7 +161,6 @@
     #'(begin
         (provide id)
         (define id val))]))
-(provide define/provide)
 
 
 ;; Combine define and (provide (contract-out ...)) for procedures.
@@ -110,22 +175,22 @@
 ;;   (display str)
 ;;   (newline))
 ;;   
-(define-syntax (define/provide/contract-out stx)
-  ;;;;;;;;;;;;
-  (syntax-case stx ()
+(define-syntax-case/provide (define/provide/contract-out stx)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;  ---------------------------
     [(_ (rator rands ...) (tract ...) body0 bodyN ...)
-     #'(begin
+     #`(begin
          (provide (contract-out [rator (tract ...)]))
-         (define (rator rands ...) body0 bodyN ...))]
-    ));/define-syntax d/p/co
-(provide define/provide/contract-out)
+         #,(syntax/loc stx
+             (define (rator rands ...) body0 bodyN ...)))]
+    );/define-syntax d/p/co
 
 
 ;; Combine struct and (provide (struct-out ...)) for structs.
 ;; Syntax is just like struct (in Racket 6.5).
 ;;
+(provide struct/provide)
 (define-syntax (struct/provide stx)
-  ;;;;;;;;;;;;
+  ;;;;;;;;;;;;  --------------
   (syntax-case stx ()
     [(_ id (fields ...) options ...)
      #'(begin
@@ -138,7 +203,6 @@
          (struct id super-struct (fields ...) options ...))]
     );syn case
   );def
-(provide struct/provide)
 
 
 ;; Combine struct and (provide (contract-out ... )) for structs.
@@ -154,8 +218,9 @@
 ;;    [petal-count exact-nonnegative-integer? #:mutable])
 ;;   #:transparent)
 ;;
+(provide struct/provide/contract-out)
 (define-syntax (struct/provide/contract-out stx)
-  ;;;;;;;;;;;;
+  ;;;;;;;;;;;;  ---------------------------
   (syntax-case stx ()
    [(_ id (field ...) options ...)
     (let ()
@@ -198,29 +263,23 @@
     ]
    );/syntax-case
   );/def
-(provide struct/provide/contract-out)
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Constants
 
 (define/provide the-empty-hash (hash))  ; immutable
+;;;;;;;;;;;;;;; --------------
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Procedures
 
 
-;(define/provide/contract-out (mutable? value)
-;  (-> any/c
-;      boolean?)
-;  (not (immutable? value)))
-
-
 ;; Invokes hash-ref! with the resulting value in tail position.
 ;;
 (define/provide/contract-out (hash-ref!/tail hash key value-thunk)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  --------------
   (-> (and/c hash? (not/c immutable?))  ;hash
       any/c  ;key
       (-> any/c)  ;value-thunk
@@ -247,8 +306,17 @@
 ;; Graveyard...
 
 ;(define-for-syntax (syntactic-map stx proc data-from-syntax)
+;                    /////////////
 ;  (datum->syntax stx (map proc data-from-syntax)))
-;
+
 ;(define-for-syntax (syntactic-cars stx data-from-syntax)
+;                    //////////////
 ;  (syntactic-map stx car data-from-syntax))
+
+;(define/provide/contract-out (mutable? value)
+;                             /////////
+;  (-> any/c
+;      boolean?)
+;  (not (immutable? value)))
+
 
