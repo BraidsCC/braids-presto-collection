@@ -2,7 +2,7 @@
 
 
 (define/provide-rules test-rules
-  (display (~a "start posure: " (rules-state-posure-parm) "\n"))
+  ;(display (~a "start posure: " (rules-state-posure-parm) "\n"))
   
   (remember assert (lambda (boo) (cond [(false? boo) (error "assertion failed")])))
   
@@ -13,7 +13,7 @@
   (($ assert) (eq? ($ overridden) 'please))
 
   
-  (display (~a "pre-one posure: " (rules-state-posure-parm) "\n"))
+  ;(display (~a "pre-one posure: " (rules-state-posure-parm) "\n"))
   
   (define-section one
     (remember onsie 1)
@@ -26,16 +26,16 @@
 
     (add1 ($ onsie))
     
-    (display (~a "one end posure: " (rules-state-posure-parm) "\n"))
+    ;(display (~a "one end posure: " (rules-state-posure-parm) "\n"))
     );def-sec
 
-  (display (~a "post-one posure: " (rules-state-posure-parm) "\n"))
+  ;(display (~a "post-one posure: " (rules-state-posure-parm) "\n"))
 
   (($ assert) (eq? ($ overridden) 'please))
   (($ assert) (eq? ($ root-cause) "evil"))
   
-  (display (~a "end posure: " (rules-state-posure-parm) "\n"))
+  ;(display (~a "end posure: " (rules-state-posure-parm) "\n"))
   );def-rules
 
 
-(test-rules)
+(test-rules '())

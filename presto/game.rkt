@@ -1,265 +1,1613 @@
-#lang racket
+#reader(lib"read.ss""wxme")WXME0108 ## 
+#|
+   This file uses the GRacket editor format.
+   Open this file in DrRacket version 6.5 or later to read it.
 
-(require "../braids/util.rkt")
+   Most likely, it was created by saving a program in DrRacket,
+   and it probably contains a program with non-text elements
+   (such as images or comment boxes).
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Structs
-
-(struct/provide/contract-out presto-move ((player presto-player?)
-                                          (action symbol?)
-                                          (parameters hash?)
-                                          )
-                             #:transparent)
-
-(struct/provide/contract-out presto-player ((name string?)
-                                            (hand presto-zone?)
-                                            (field presto-zone?)
-                                            (library presto-zone?)
-                                            (sideboard presto-zone?) ;100.4
-                                            (graveyard presto-zone?)
-                                            (exile presto-zone?)
-                                            (counters presto-counters?)
-                                            )
-                             ;#:transparent
-                             )
-
-(struct/provide/contract-out presto-state ((players (listof presto-player?))
-                                           (turn-owner presto-player?)
-                                           (active-player presto-player?) ;102.1
-                                           (phase symbol?)
-                                           (step symbol?)
-                                           (stack list?)
-                                           (awaiting-stack-order list?)
-                                           (players-who-have-passed (listof presto-player?))
-                                           (shuffle boolean?)
-                                           (phase-details hash?)
-                                           (moves-cache (or/c void? (set/c presto-move?)) #:mutable)
-                                           )
-                             #:transparent
-                             )
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Values (constants)
-
-(define/provide presto-empty-zone '())
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Procedures
-
-(define/provide/contract-out (presto-canned-state players active-index shuffle)
-  (-> (vectorof presto-player?) ;players
-      exact-nonnegative-integer?  ;active-index - which player in players (vector-ref) is going first
-      boolean? ;shuffle
-      presto-state?)
-
-  (define active-player (vector-ref players active-index))
-  
-  (presto-state (vector->list players) ;players
-                active-player ;turn-owner
-                active-player ;active-player
-                'starting-the-game ;phase
-                'play-or-draw ;step
-                '() ;stack
-                '() ;awaiting-stack-order
-                '() ;players-who-have-passed
-                the-empty-hash ;phase-details
-                shuffle  ;shuffle
-                (void) ;moves-cache (not yet built)
-                )
-  );/define
-
-
-(define/provide/contract-out (presto-card? val)
-  (->           any/c  ;val
-                boolean?)
-  (string? val))
-
-(define/provide/contract-out (presto-counter? val)
-  (->              any/c  ;val
-                   boolean?)
-  (and (pair? val)
-       (symbol? (car val))))
-
-
-(define/provide/contract-out (presto-counters ls)
-  (->              (listof presto-counter?)  ;ls
-                   presto-counters?
-                   )
-  (apply hasheq (flatten ls)))
-
-
-(define/provide presto-counters? hash-eq?)
-
-
-(define/provide/contract-out (presto-get-player-by-name state player-name)
-  (-> presto-state? ;state
-      string? ; player-name
-      presto-player?)
-
-  (define matching-players (filter (lambda (p) (equal? player-name (presto-player-name p)))
-                                   (presto-state-players state)))
-  
-  (cond
-    [(empty? (cdr matching-players))
-     (car matching-players)]  ; only one result, yay!
-    [(empty? matching-players)
-     (error "No player found by that name")]
-    [else
-     (error "Multiple players found having that name")]
-    )
-  );/def/pro/con
-
-
-(define/provide/contract-out (presto-legal-moves state)
-  (-> presto-state? ;state
-   (set/c presto-move?))
-
-  (define (compute-moves-no-cache state)
-
-    (define active-player (presto-state-active-player state))
-    
-    (case (presto-state-phase state)
-      [(starting-the-game)  ;phase
-       (case (presto-state-step state)
-         [(play-or-draw) ;step
-          (set (presto-move active-player 'play-first the-empty-hash)
-               (presto-move active-player 'draw-first the-empty-hash))
-          ]
-         [else (set)]
-         ); case on step
-       ] ;starting-the-game phase
-      [(beginning) ;phase
-       (case (presto-state-step state)
-         [(upkeep)  ; similar to ending phase, end step
-          ;; Query hands and field to see if players can do anything.  Assuming not...
-          (set (presto-move active-player 'pass the-empty-hash))
-          ];upkeep step
-         [else (set)]
-         );case on step
-       
-       ];beginning phase
-      [else (set)]
-      );case on phase
-    );def
-  
-  (define (fetch-cache) (presto-state-moves-cache state))
-  
-  (cond
-    [(void? (fetch-cache))
-     (display (~a "moves-cache miss\n"))
-     (set-presto-state-moves-cache! state (compute-moves-no-cache state))
-     ]
-    [else
-     (display (~a "moves-cache hit\n"))
-     ]
-    );cond
-
-  (fetch-cache)
-    
-  );def
-
-
-(define/provide/contract-out (presto-losing-players state)
-  (-> presto-state?  ;state
-      (listof presto-player?))
-  
-  (define players (presto-state-players state))
-  (filter presto-player-lost? players)
-  );/define
-
-
-(define/provide/contract-out (presto-name->card cheese)
-  (-> string? ; cheese
-      presto-card?)
-  
-  cheese)
-
-
-(define/provide/contract-out (presto-perform-move state move)
-  (-> presto-state?  ;state
-   presto-move?  ;move
-   presto-state?)
-
-  ;; quick security/sanity check
-  (if (set-member? (presto-legal-moves state) move)
-      'awesome
-      (error "attempted to perform illegal move"))
-
-  (case (presto-move-action move)
-    [else
-     (error (~a "don't know how to perform move: " move))
-     ]
-    );case
-  );def
-
-
-(define/provide/contract-out (presto-player-lost? player)
-  (-> presto-player?  ;player
-      boolean?)
-
-  (define counters (presto-player-counters player))
-  (or ((hash-ref counters 'poison) . >= . 10)
-      ((hash-ref counters 'life) . <= . 0))
-  );/define
-
-
-(define/provide/contract-out (presto-tick state)
-  (-> presto-state?
-      presto-state?)
-
-  (define (nyi-error-string phase step)
-    (~a "not implemented: phase " phase ", step " step))
-
-  (define phase (presto-state-phase state))
-  (define step (presto-state-step state))
-  (define moves (presto-legal-moves state))
-
-  (cond
-    [(not (empty? moves))
-     (error
-      (~a "cannot step forward while waiting for player(s) to select a move; moves = " moves))
-      ]
-    [else
-     (case phase
-       [(beginning)
-        (case step
-          [(untap)
-           (define intermediate-state (presto-untap-all state))
-           (struct-copy presto-state intermediate-state [step 'upkeep])]
-          [else
-           (error (nyi-error-string phase step))
-           ];case-else
-          );case on step
-        ];beginning phase
-       [else
-        (error (nyi-error-string phase step))
-        ];case-else
-       );case on phase
-     ];cond-else
-    );cond
-  );def
-
-
-(define/provide/contract-out (presto-untap-all state)
-  (-> presto-state?
-      presto-state?)
-
-  ;~~~ untap all cards in fields.
-  state
-  );/defprocon
-
-
-(define/provide/contract-out (presto-winner state)
-  (-> presto-state?
-      (or/c presto-player? false?))
-
-  #f  ;~~~ implement
-  );def
-
-(define/provide/contract-out (presto-zone? val)
-  (-> any/c ;val
-      boolean?)
-
-  (list? val))
+            http://racket-lang.org/
+|#
+ 32 7 #"wxtext\0"
+3 1 6 #"wxtab\0"
+1 1 8 #"wximage\0"
+2 0 8 #"wxmedia\0"
+4 1 34 #"(lib \"syntax-browser.ss\" \"mrlib\")\0"
+1 0 16 #"drscheme:number\0"
+3 0 44 #"(lib \"number-snip.ss\" \"drscheme\" \"private\")\0"
+1 0 36 #"(lib \"comment-snip.ss\" \"framework\")\0"
+1 0 93
+(
+ #"((lib \"collapsed-snipclass.ss\" \"framework\") (lib \"collapsed-sni"
+ #"pclass-wxme.ss\" \"framework\"))\0"
+) 0 0 43 #"(lib \"collapsed-snipclass.ss\" \"framework\")\0"
+0 0 19 #"drscheme:sexp-snip\0"
+0 0 36 #"(lib \"cache-image-snip.ss\" \"mrlib\")\0"
+1 0 68
+(
+ #"((lib \"image-core.ss\" \"mrlib\") (lib \"image-core-wxme.rkt\" \"mr"
+ #"lib\"))\0"
+) 1 0 29 #"drscheme:bindings-snipclass%\0"
+1 0 101
+(
+ #"((lib \"ellipsis-snip.rkt\" \"drracket\" \"private\") (lib \"ellipsi"
+ #"s-snip-wxme.rkt\" \"drracket\" \"private\"))\0"
+) 2 0 88
+(
+ #"((lib \"pict-snip.rkt\" \"drracket\" \"private\") (lib \"pict-snip.r"
+ #"kt\" \"drracket\" \"private\"))\0"
+) 0 0 34 #"(lib \"bullet-snip.rkt\" \"browser\")\0"
+0 0 25 #"(lib \"matrix.ss\" \"htdp\")\0"
+1 0 22 #"drscheme:lambda-snip%\0"
+1 0 29 #"drclickable-string-snipclass\0"
+0 0 26 #"drracket:spacer-snipclass\0"
+0 0 57
+#"(lib \"hrule-snip.rkt\" \"macro-debugger\" \"syntax-browser\")\0"
+1 0 26 #"drscheme:pict-value-snip%\0"
+0 0 45 #"(lib \"image-snipr.ss\" \"slideshow\" \"private\")\0"
+1 0 38 #"(lib \"pict-snipclass.ss\" \"slideshow\")\0"
+2 0 55 #"(lib \"vertical-separator-snip.ss\" \"stepper\" \"private\")\0"
+1 0 18 #"drscheme:xml-snip\0"
+1 0 31 #"(lib \"xml-snipclass.ss\" \"xml\")\0"
+1 0 21 #"drscheme:scheme-snip\0"
+2 0 34 #"(lib \"scheme-snipclass.ss\" \"xml\")\0"
+1 0 10 #"text-box%\0"
+1 0 32 #"(lib \"text-snipclass.ss\" \"xml\")\0"
+1 0 1 6 #"wxloc\0"
+          0 0 87 0 1 #"\0"
+0 75 1 #"\0"
+0 10 90 -1 90 -1 3 -1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 255 255 255 1 -1 0 9
+#"Standard\0"
+0 75 15 #"Lucida Console\0"
+0 14 90 -1 90 -1 3 -1 0 1 0 1 0 0 0 0 0 0 0 0 0 0 0 255 255 255 1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1 1 1 1 1 1 0 0 0 0 0 0 -1 -1 2 24
+#"framework:default-color\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 255 255 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 150 0 150 0 0 0 -1 -1 2 15
+#"text:ports out\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 192 46 214 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1.0 0 -1 -1 93 -1 -1 -1 0 0 0 0 0 0 0 0 0 1.0 1.0 1.0 255 0 0 0 0 0 -1
+-1 2 15 #"text:ports err\0"
+0 -1 1 #"\0"
+1 0 -1 -1 93 -1 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 0 0 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 0 0 175 0 0 0 -1 -1 2 17
+#"text:ports value\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 57 89 216 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1.0 0 92 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1.0 1.0 1.0 34 139 34 0 0 0 -1
+-1 2 27 #"Matching Parenthesis Style\0"
+0 -1 1 #"\0"
+1.0 0 92 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1.0 1.0 1.0 34 139 34 0 0 0 -1
+-1 2 1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 102 102 255 0 0 0 -1 -1 2
+37 #"framework:syntax-color:scheme:symbol\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 102 102 255 0 0 0 -1 -1 2
+38 #"framework:syntax-color:scheme:keyword\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 102 102 255 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 249 148 40 0 0 0 -1 -1 2
+38 #"framework:syntax-color:scheme:comment\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 249 148 40 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 51 174 51 0 0 0 -1 -1 2 37
+#"framework:syntax-color:scheme:string\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 51 174 51 0 0 0 -1 -1 2 35
+#"framework:syntax-color:scheme:text\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 51 174 51 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 60 194 57 0 0 0 -1 -1 2 39
+#"framework:syntax-color:scheme:constant\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 60 194 57 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 151 69 43 0 0 0 -1 -1 2 49
+#"framework:syntax-color:scheme:hash-colon-keyword\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 151 69 43 0 0 0 -1 -1 2 42
+#"framework:syntax-color:scheme:parenthesis\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 151 69 43 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 0 0 0 0 0 -1 -1 2 36
+#"framework:syntax-color:scheme:error\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 0 0 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+36 #"framework:syntax-color:scheme:other\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+16 #"Misspelled Text\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 50 163 255 0 0 0 -1 -1 2
+38 #"drracket:check-syntax:lexically-bound\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 50 163 255 0 0 0 -1 -1 2 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 192 203 0 0 0 -1 -1 2
+28 #"drracket:check-syntax:set!d\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 192 203 0 0 0 -1 -1 2
+37 #"drracket:check-syntax:unused-require\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 192 203 0 0 0 -1 -1 2
+36 #"drracket:check-syntax:free-variable\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 192 203 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 166 0 255 0 0 0 -1 -1 2 31
+#"drracket:check-syntax:imported\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 166 0 255 0 0 0 -1 -1 2 47
+#"drracket:check-syntax:my-obligation-style-pref\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 192 203 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 50 205 50 0 0 0 -1 -1 2 50
+#"drracket:check-syntax:their-obligation-style-pref\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 50 205 50 0 0 0 -1 -1 2 48
+#"drracket:check-syntax:unk-obligation-style-pref\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 240 230 140 0 0 0 -1 -1 2
+49 #"drracket:check-syntax:both-obligation-style-pref\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 240 230 140 0 0 0 -1 -1 2
+26 #"plt:htdp:test-coverage-on\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 1 0 0 0 0 0 0 205 92 92 0 0 0 -1 -1 2 27
+#"plt:htdp:test-coverage-off\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 1 0 0 0 0 0 0 205 92 92 0 0 0 -1 -1 4 1
+#"\0"
+0 70 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1.0 1.0 1.0 1.0 1.0 1.0 0 0 0 0 0 0
+-1 -1 4 4 #"XML\0"
+0 70 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1.0 1.0 1.0 1.0 1.0 1.0 0 0 0 0 0 0
+-1 -1 2 37 #"plt:module-language:test-coverage-on\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 2
+38 #"plt:module-language:test-coverage-off\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 93 -1 -1 0 1 0 0 0 1 0 0 0 0 0 0 205 92 92 0 0 0 -1 -1 4 1
+#"\0"
+0 71 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1.0 1.0 1.0 1.0 1.0 1.0 0 0 0 0 0 0
+-1 -1 4 1 #"\0"
+0 -1 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 1 0 0 0 0 0 0 0 0 1.0 1.0 1.0 0 0 255 0 0 0 -1
+-1 4 1 #"\0"
+0 71 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 1 0 0 0 0 0 0 0 0 1.0 1.0 1.0 0 0 255 0 0 0 -1
+-1 4 1 #"\0"
+0 71 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1.0 1.0 1.0 0 100 0 0 0 0 -1
+-1 2 1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 200 0 0 0 0 0 -1 -1 4 32
+#"widget.rkt::browser-text% basic\0"
+0 70 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1.0 1.0 1.0 1.0 1.0 1.0 0 0 0 0 0 0
+-1 -1 4 59
+#"macro-debugger/syntax-browser/properties color-text% basic\0"
+0 70 1 #"\0"
+1.0 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 1.0 1.0 1.0 1.0 1.0 1.0 0 0 0 0 0 0
+-1 -1 58 1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 190 190 190 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 255 255 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 0 0 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 0 0 255 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 185 220 113 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 155 255 155 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 116 116 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 18 67 155 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 30 70 190 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 75 135 185 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 176 208 208 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 116 116 255 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 200 125 255 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 143 15 223 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 165 0 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 141 19 5 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 244 194 71 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 255 127 0 0 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 86 86 86 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 255 255 30 3 0 -1 -1 4
+1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 255 255 0 31 31 -1 -1
+4 1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 0 0 0 31 31 -1 -1 57 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 93 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 255 0 0 0 0 0 -1 -1 58 1
+#"\0"
+0 -1 1 #"\0"
+1 0 92 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 0 0 255 0 0 0 -1 -1 58 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 0 0 0 0 1 1 1 0 0 255 0 0 0 -1 -1 4 1
+#"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 255 255 184 134 11 -1
+-1 4 1 #"\0"
+0 -1 1 #"\0"
+1.0 0 92 -1 -1 -1 -1 -1 0 0 0 0 0 1 0 0 0 0 0 0 255 255 255 184 134 11
+-1 -1 58 1 #"\0"
+0 -1 1 #"\0"
+1 0 -1 -1 -1 -1 -1 -1 1 0 0 0 0 0 0 0 0 1 1 1 0 0 255 0 0 0 -1 -1
+          0 1224 0 29 3 12 #"#lang racket"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 7 #"require"
+0 0 25 3 1 #" "
+0 0 19 3 20 #"\"../braids/util.rkt\""
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 7 #"require"
+0 0 25 3 1 #" "
+0 0 19 3 12 #"\"player.rkt\""
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 17 3 40 #";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"
+0 0 25 29 1 #"\n"
+0 0 17 3 10 #";; Structs"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 14 3 27 #"struct/provide/contract-out"
+0 0 25 3 1 #" "
+0 0 14 3 11 #"presto-move"
+0 0 25 3 3 #" (("
+0 0 14 3 6 #"player"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 43 #"                                          ("
+0 0 14 3 6 #"action"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"symbol?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 43 #"                                          ("
+0 0 14 3 10 #"parameters"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"hash?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 43 #"                                          )"
+0 0 25 29 1 #"\n"
+0 0 25 3 29 #"                             "
+0 0 24 3 13 #"#:transparent"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 14 3 27 #"struct/provide/contract-out"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"presto-state"
+0 0 25 3 3 #" (("
+0 0 14 3 7 #"players"
+0 0 25 3 2 #" ("
+0 0 14 3 6 #"listof"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 10 #"turn-owner"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #") "
+0 0 17 3 6 #";102.1"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 5 #"phase"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"symbol?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 4 #"step"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"symbol?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 5 #"stack"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"list?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 20 #"awaiting-stack-order"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"list?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 23 #"players-who-have-passed"
+0 0 25 3 2 #" ("
+0 0 14 3 6 #"listof"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 7 #"shuffle"
+0 0 25 3 1 #" "
+0 0 14 3 8 #"boolean?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 13 #"phase-details"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"hash?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           ("
+0 0 14 3 11 #"moves-cache"
+0 0 25 3 2 #" ("
+0 0 14 3 4 #"or/c"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"void?"
+0 0 25 3 2 #" ("
+0 0 14 3 5 #"set/c"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"presto-move?"
+0 0 25 3 3 #")) "
+0 0 24 3 9 #"#:mutable"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 44 #"                                           )"
+0 0 25 29 1 #"\n"
+0 0 25 3 29 #"                             "
+0 0 24 3 13 #"#:transparent"
+0 0 25 29 1 #"\n"
+0 0 25 3 30 #"                             )"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 17 3 40 #";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"
+0 0 25 29 1 #"\n"
+0 0 17 3 21 #";; Values (constants)"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 14 #"define/provide"
+0 0 25 3 1 #" "
+0 0 14 3 17 #"presto-empty-zone"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 25 3 3 #"())"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 17 3 40 #";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;"
+0 0 25 29 1 #"\n"
+0 0 17 3 13 #";; Procedures"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 19 #"presto-canned-state"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"players"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"active-index"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"shuffle"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 2 #" ("
+0 0 14 3 8 #"vectorof"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #") "
+0 0 17 3 8 #";players"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 26 #"exact-nonnegative-integer?"
+0 0 25 3 2 #"  "
+0 0 17 3 67
+#";active-index - which player in players (vector-ref) is going first"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 8 #"boolean?"
+0 0 25 3 1 #" "
+0 0 17 3 8 #";shuffle"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"active-player"
+0 0 25 3 2 #" ("
+0 0 14 3 10 #"vector-ref"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"players"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"active-index"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 12 #"presto-state"
+0 0 25 3 2 #" ("
+0 0 14 3 12 #"vector->list"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"players"
+0 0 25 3 2 #") "
+0 0 17 3 8 #";players"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 17 3 11 #";turn-owner"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 17 3 14 #";active-player"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 22 3 1 #"'"
+0 0 14 3 17 #"starting-the-game"
+0 0 25 3 1 #" "
+0 0 17 3 6 #";phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 22 3 1 #"'"
+0 0 14 3 12 #"play-or-draw"
+0 0 25 3 1 #" "
+0 0 17 3 5 #";step"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 22 3 1 #"'"
+0 0 25 3 3 #"() "
+0 0 17 3 6 #";stack"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 22 3 1 #"'"
+0 0 25 3 3 #"() "
+0 0 17 3 21 #";awaiting-stack-order"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 22 3 1 #"'"
+0 0 25 3 3 #"() "
+0 0 17 3 24 #";players-who-have-passed"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 14 3 14 #"the-empty-hash"
+0 0 25 3 1 #" "
+0 0 17 3 14 #";phase-details"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 14 3 7 #"shuffle"
+0 0 25 3 2 #"  "
+0 0 17 3 8 #";shuffle"
+0 0 25 29 1 #"\n"
+0 0 25 3 17 #"                ("
+0 0 14 3 4 #"void"
+0 0 25 3 2 #") "
+0 0 17 3 28 #";moves-cache (not yet built)"
+0 0 25 29 1 #"\n"
+0 0 25 3 17 #"                )"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 8 #";/define"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 12 #"presto-card?"
+0 0 25 3 1 #" "
+0 0 14 3 3 #"val"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 11 #"           "
+0 0 14 3 5 #"any/c"
+0 0 25 3 2 #"  "
+0 0 17 3 4 #";val"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"                "
+0 0 14 3 8 #"boolean?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 7 #"string?"
+0 0 25 3 1 #" "
+0 0 14 3 3 #"val"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 15 #"presto-counter?"
+0 0 25 3 1 #" "
+0 0 14 3 3 #"val"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 14 #"              "
+0 0 14 3 5 #"any/c"
+0 0 25 3 2 #"  "
+0 0 17 3 4 #";val"
+0 0 25 29 1 #"\n"
+0 0 25 3 19 #"                   "
+0 0 14 3 8 #"boolean?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 3 #"and"
+0 0 25 3 2 #" ("
+0 0 14 3 5 #"pair?"
+0 0 25 3 1 #" "
+0 0 14 3 3 #"val"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       ("
+0 0 14 3 7 #"symbol?"
+0 0 25 3 2 #" ("
+0 0 14 3 3 #"car"
+0 0 25 3 1 #" "
+0 0 14 3 3 #"val"
+0 0 25 3 4 #"))))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 15 #"presto-counters"
+0 0 25 3 1 #" "
+0 0 14 3 2 #"ls"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 15 #"              ("
+0 0 14 3 6 #"listof"
+0 0 25 3 1 #" "
+0 0 14 3 15 #"presto-counter?"
+0 0 25 3 3 #")  "
+0 0 17 3 3 #";ls"
+0 0 25 29 1 #"\n"
+0 0 25 3 19 #"                   "
+0 0 14 3 16 #"presto-counters?"
+0 0 25 29 1 #"\n"
+0 0 25 3 20 #"                   )"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 5 #"apply"
+0 0 25 3 1 #" "
+0 0 14 3 6 #"hasheq"
+0 0 25 3 2 #" ("
+0 0 14 3 7 #"flatten"
+0 0 25 3 1 #" "
+0 0 14 3 2 #"ls"
+0 0 25 3 3 #")))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 14 #"define/provide"
+0 0 25 3 1 #" "
+0 0 14 3 16 #"presto-counters?"
+0 0 25 3 1 #" "
+0 0 14 3 8 #"hash-eq?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 25 #"presto-get-player-by-name"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #" "
+0 0 14 3 11 #"player-name"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #" "
+0 0 17 3 6 #";state"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 7 #"string?"
+0 0 25 3 1 #" "
+0 0 17 3 13 #"; player-name"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 16 #"matching-players"
+0 0 25 3 2 #" ("
+0 0 14 3 6 #"filter"
+0 0 25 3 2 #" ("
+0 0 15 3 6 #"lambda"
+0 0 25 3 2 #" ("
+0 0 14 3 1 #"p"
+0 0 25 3 3 #") ("
+0 0 14 3 6 #"equal?"
+0 0 25 3 1 #" "
+0 0 14 3 11 #"player-name"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-player-name"
+0 0 25 3 1 #" "
+0 0 14 3 1 #"p"
+0 0 25 3 3 #")))"
+0 0 25 29 1 #"\n"
+0 0 25 3 36 #"                                   ("
+0 0 14 3 20 #"presto-state-players"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 3 #")))"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 4 #"cond"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"    [("
+0 0 14 3 6 #"empty?"
+0 0 25 3 2 #" ("
+0 0 14 3 3 #"cdr"
+0 0 25 3 1 #" "
+0 0 14 3 16 #"matching-players"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 3 #"car"
+0 0 25 3 1 #" "
+0 0 14 3 16 #"matching-players"
+0 0 25 3 4 #")]  "
+0 0 17 3 23 #"; only one result, yay!"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"    [("
+0 0 14 3 6 #"empty?"
+0 0 25 3 1 #" "
+0 0 14 3 16 #"matching-players"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 5 #"error"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 2 #"No"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"player"
+0 0 19 3 1 #" "
+0 0 19 3 5 #"found"
+0 0 19 3 1 #" "
+0 0 19 3 2 #"by"
+0 0 19 3 1 #" "
+0 0 19 3 4 #"that"
+0 0 19 3 5 #" name"
+0 0 19 3 1 #"\""
+0 0 25 3 2 #")]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 5 #"error"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 8 #"Multiple"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"players"
+0 0 19 3 1 #" "
+0 0 19 3 5 #"found"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"having"
+0 0 19 3 1 #" "
+0 0 19 3 4 #"that"
+0 0 19 3 5 #" name"
+0 0 19 3 1 #"\""
+0 0 25 3 2 #")]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    )"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 13 #";/def/pro/con"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-legal-moves"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #" "
+0 0 17 3 6 #";state"
+0 0 25 29 1 #"\n"
+0 0 25 3 4 #"   ("
+0 0 14 3 5 #"set/c"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"presto-move?"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 2 #" ("
+0 0 14 3 22 #"compute-moves-no-cache"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"active-player"
+0 0 25 3 2 #" ("
+0 0 14 3 26 #"presto-state-active-player"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 4 #"    "
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ("
+0 0 15 3 4 #"case"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-state-phase"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"      [("
+0 0 14 3 17 #"starting-the-game"
+0 0 25 3 3 #")  "
+0 0 17 3 6 #";phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       ("
+0 0 15 3 4 #"case"
+0 0 25 3 2 #" ("
+0 0 14 3 17 #"presto-state-step"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"         [("
+0 0 14 3 12 #"play-or-draw"
+0 0 25 3 2 #") "
+0 0 17 3 5 #";step"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          ("
+0 0 14 3 3 #"set"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"presto-move"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 10 #"play-first"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"the-empty-hash"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 16 #"               ("
+0 0 14 3 11 #"presto-move"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 10 #"draw-first"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"the-empty-hash"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          ]"
+0 0 25 29 1 #"\n"
+0 0 25 3 10 #"         ["
+0 0 14 3 4 #"else"
+0 0 25 3 2 #" ("
+0 0 14 3 3 #"set"
+0 0 25 3 2 #")]"
+0 0 25 29 1 #"\n"
+0 0 25 3 10 #"         )"
+0 0 17 3 14 #"; case on step"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"       ] "
+0 0 17 3 24 #";starting-the-game phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"      [("
+0 0 15 3 9 #"beginning"
+0 0 25 3 2 #") "
+0 0 17 3 6 #";phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       ("
+0 0 15 3 4 #"case"
+0 0 25 3 2 #" ("
+0 0 14 3 17 #"presto-state-step"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"         [("
+0 0 14 3 6 #"upkeep"
+0 0 25 3 3 #")  "
+0 0 17 3 35 #"; similar to ending phase, end step"
+0 0 25 29 1 #"\n"
+0 0 25 3 10 #"          "
+0 0 17 3 76
+(
+ #";; Query hands and field to see if players can do anything.  Assumin"
+ #"g not..."
+) 0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          ("
+0 0 14 3 3 #"set"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"presto-move"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"active-player"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 4 #"pass"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"the-empty-hash"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          ]"
+0 0 17 3 12 #";upkeep step"
+0 0 25 29 1 #"\n"
+0 0 25 3 10 #"         ["
+0 0 14 3 4 #"else"
+0 0 25 3 2 #" ("
+0 0 14 3 3 #"set"
+0 0 25 3 2 #")]"
+0 0 25 29 1 #"\n"
+0 0 25 3 10 #"         )"
+0 0 17 3 13 #";case on step"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"       "
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       ]"
+0 0 17 3 16 #";beginning phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ["
+0 0 14 3 4 #"else"
+0 0 25 3 2 #" ("
+0 0 14 3 3 #"set"
+0 0 25 3 2 #")]"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      )"
+0 0 17 3 14 #";case on phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    )"
+0 0 17 3 4 #";def"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"fetch-cache"
+0 0 25 3 3 #") ("
+0 0 14 3 24 #"presto-state-moves-cache"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 4 #"cond"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"    [("
+0 0 14 3 5 #"void?"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"fetch-cache"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 7 #"display"
+0 0 25 3 2 #" ("
+0 0 14 3 2 #"~a"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 11 #"moves-cache"
+0 0 19 3 7 #" miss\\n"
+0 0 19 3 1 #"\""
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 29 #"set-presto-state-moves-cache!"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #" ("
+0 0 14 3 22 #"compute-moves-no-cache"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 7 #"display"
+0 0 25 3 2 #" ("
+0 0 14 3 2 #"~a"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 11 #"moves-cache"
+0 0 19 3 6 #" hit\\n"
+0 0 19 3 1 #"\""
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    )"
+0 0 17 3 5 #";cond"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 11 #"fetch-cache"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 4 #"    "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 4 #";def"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 21 #"presto-losing-players"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 2 #"  "
+0 0 17 3 6 #";state"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ("
+0 0 14 3 6 #"listof"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"players"
+0 0 25 3 2 #" ("
+0 0 14 3 20 #"presto-state-players"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 6 #"filter"
+0 0 25 3 1 #" "
+0 0 14 3 19 #"presto-player-lost?"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"players"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 8 #";/define"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 17 #"presto-name->card"
+0 0 25 3 1 #" "
+0 0 14 3 6 #"cheese"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 7 #"string?"
+0 0 25 3 1 #" "
+0 0 17 3 8 #"; cheese"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 12 #"presto-card?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 14 3 6 #"cheese"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 19 #"presto-perform-move"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"move"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 2 #"  "
+0 0 17 3 6 #";state"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"   "
+0 0 14 3 12 #"presto-move?"
+0 0 25 3 2 #"  "
+0 0 17 3 5 #";move"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"   "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 17 3 30 #";; quick security/sanity check"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"if"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"set-member?"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-legal-moves"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #") "
+0 0 14 3 4 #"move"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 22 3 1 #"'"
+0 0 14 3 7 #"awesome"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ("
+0 0 14 3 5 #"error"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 9 #"attempted"
+0 0 19 3 1 #" "
+0 0 19 3 2 #"to"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"perform"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"illegal"
+0 0 19 3 5 #" move"
+0 0 19 3 1 #"\""
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 4 #"case"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-move-action"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"move"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 5 #"error"
+0 0 25 3 2 #" ("
+0 0 14 3 2 #"~a"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 3 #"don"
+0 0 19 3 1 #"'"
+0 0 19 3 1 #"t"
+0 0 19 3 1 #" "
+0 0 19 3 4 #"know"
+0 0 19 3 1 #" "
+0 0 19 3 3 #"how"
+0 0 19 3 1 #" "
+0 0 19 3 2 #"to"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"perform"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"move: "
+0 0 19 3 1 #"\""
+0 0 25 3 1 #" "
+0 0 14 3 4 #"move"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    )"
+0 0 17 3 5 #";case"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 4 #";def"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 7         421 4           0 0           0 69 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 19 #"presto-player-lost?"
+0 0 25 3 1 #" "
+0 0 14 3 6 #"player"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 2 #"  "
+0 0 17 3 7 #";player"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 8 #"boolean?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 8 #"counters"
+0 0 25 3 2 #" ("
+0 0 14 3 22 #"presto-player-counters"
+0 0 25 3 1 #" "
+0 0 14 3 6 #"player"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"or"
+0 0 25 3 3 #" (("
+0 0 14 3 8 #"hash-ref"
+0 0 25 3 1 #" "
+0 0 14 3 8 #"counters"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 6 #"poison"
+0 0 25 3 2 #") "
+0 0 29 3 1 #"."
+0 0 25 3 1 #" "
+0 0 14 3 2 #">="
+0 0 25 3 1 #" "
+0 0 29 3 1 #"."
+0 0 25 3 1 #" "
+0 0 22 3 2 #"10"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"      (("
+0 0 14 3 8 #"hash-ref"
+0 0 25 3 1 #" "
+0 0 14 3 8 #"counters"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 4 #"life"
+0 0 25 3 2 #") "
+0 0 29 3 1 #"."
+0 0 25 3 1 #" "
+0 0 14 3 2 #"<="
+0 0 25 3 1 #" "
+0 0 29 3 1 #"."
+0 0 25 3 1 #" "
+0 0 22 3 1 #"0"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 8 #";/define"
+0 0 25 29 1 #"\n"
+0           0 0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 11 #"presto-tick"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 2 #" ("
+0 0 14 3 16 #"nyi-error-string"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ("
+0 0 14 3 2 #"~a"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 3 #"not"
+0 0 19 3 1 #" "
+0 0 19 3 12 #"implemented:"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"phase "
+0 0 19 3 1 #"\""
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 1 #","
+0 0 19 3 1 #" "
+0 0 19 3 5 #"step "
+0 0 19 3 1 #"\""
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-state-phase"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 3 2 #" ("
+0 0 14 3 17 #"presto-state-step"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"moves"
+0 0 25 3 2 #" ("
+0 0 14 3 18 #"presto-legal-moves"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 15 3 4 #"cond"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"    [("
+0 0 14 3 3 #"not"
+0 0 25 3 2 #" ("
+0 0 14 3 6 #"empty?"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"moves"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 14 3 5 #"error"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ("
+0 0 14 3 2 #"~a"
+0 0 25 3 1 #" "
+0 0 19 3 1 #"\""
+0 0 19 3 6 #"cannot"
+0 0 19 3 1 #" "
+0 0 19 3 4 #"step"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"forward"
+0 0 19 3 1 #" "
+0 0 19 3 5 #"while"
+0 0 19 3 1 #" "
+0 0 19 3 7 #"waiting"
+0 0 19 3 1 #" "
+0 0 19 3 3 #"for"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"player"
+0 0 19 3 1 #"("
+0 0 19 3 1 #"s"
+0 0 19 3 2 #") "
+0 0 19 3 2 #"to"
+0 0 19 3 1 #" "
+0 0 19 3 6 #"select"
+0 0 19 3 1 #" "
+0 0 19 3 1 #"a"
+0 0 19 3 1 #" "
+0 0 19 3 15 #"move; moves = \""
+0 0 25 3 1 #" "
+0 0 14 3 5 #"moves"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ]"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ("
+0 0 15 3 4 #"case"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"       [("
+0 0 15 3 9 #"beginning"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"        ("
+0 0 15 3 4 #"case"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 29 1 #"\n"
+0 0 25 3 12 #"          [("
+0 0 14 3 5 #"untap"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 12 #"           ("
+0 0 15 3 6 #"define"
+0 0 25 3 1 #" "
+0 0 14 3 18 #"intermediate-state"
+0 0 25 3 2 #" ("
+0 0 14 3 16 #"presto-untap-all"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 12 #"           ("
+0 0 14 3 11 #"struct-copy"
+0 0 25 3 1 #" "
+0 0 14 3 12 #"presto-state"
+0 0 25 3 1 #" "
+0 0 14 3 18 #"intermediate-state"
+0 0 25 3 2 #" ["
+0 0 14 3 4 #"step"
+0 0 25 3 1 #" "
+0 0 22 3 1 #"'"
+0 0 14 3 6 #"upkeep"
+0 0 25 3 3 #"])]"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 12 #"           ("
+0 0 14 3 5 #"error"
+0 0 25 3 2 #" ("
+0 0 14 3 16 #"nyi-error-string"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 12 #"           ]"
+0 0 17 3 10 #";case-else"
+0 0 25 29 1 #"\n"
+0 0 25 3 11 #"          )"
+0 0 17 3 13 #";case on step"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"        ]"
+0 0 17 3 16 #";beginning phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       ["
+0 0 14 3 4 #"else"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"        ("
+0 0 14 3 5 #"error"
+0 0 25 3 2 #" ("
+0 0 14 3 16 #"nyi-error-string"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"phase"
+0 0 25 3 1 #" "
+0 0 14 3 4 #"step"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 3 9 #"        ]"
+0 0 17 3 10 #";case-else"
+0 0 25 29 1 #"\n"
+0 0 25 3 8 #"       )"
+0 0 17 3 14 #";case on phase"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"     ]"
+0 0 17 3 10 #";cond-else"
+0 0 25 29 1 #"\n"
+0 0 25 3 5 #"    )"
+0 0 17 3 5 #";cond"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 4 #";def"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 16 #"presto-untap-all"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 29 1 #"\n"
+0 0 25 3 6 #"      "
+0 0 14 3 13 #"presto-state?"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 17 3 31 #";~~~ untap all cards in fields."
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 14 3 5 #"state"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 11 #";/defprocon"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 1 #"("
+0 0 15 3 27 #"define/provide/contract-out"
+0 0 25 3 2 #" ("
+0 0 14 3 13 #"presto-winner"
+0 0 25 3 1 #" "
+0 0 14 3 5 #"state"
+0 0 25 3 1 #")"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  ("
+0 0 14 3 2 #"->"
+0 0 25 3 1 #" "
+0 0 14 3 13 #"presto-state?"
+0 0 25 29 1 #"\n"
+0 0 25 3 7 #"      ("
+0 0 14 3 4 #"or/c"
+0 0 25 3 1 #" "
+0 0 14 3 14 #"presto-player?"
+0 0 25 3 1 #" "
+0 0 14 3 6 #"false?"
+0 0 25 3 2 #"))"
+0 0 25 29 1 #"\n"
+0 0 25 29 1 #"\n"
+0 0 25 3 2 #"  "
+0 0 22 3 2 #"#f"
+0 0 25 3 2 #"  "
+0 0 17 3 14 #";~~~ implement"
+0 0 25 29 1 #"\n"
+0 0 25 3 3 #"  )"
+0 0 17 3 4 #";def"
+0 0 25 29 1 #"\n"
+0           0
