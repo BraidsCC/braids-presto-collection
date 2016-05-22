@@ -68,7 +68,7 @@
              #,(syntax/loc stx
                  (define (rule-id)
                    (let ()
-                     ;(remember $section "root")
+                     (remember $section "root")
                      body ...
                      (rules-state-posure-parm)))))]))
 
@@ -85,7 +85,7 @@
      
      #`(let ()
          (push-new-empty-posure!)
-         ;(remember $section (symbol->string (quote section-id)))
+         (remember $section (symbol->string (quote section-id)))
          #,(syntax/loc stx  ;; Transfer error reporting to consumer code.
              (let ()
                body ...))
