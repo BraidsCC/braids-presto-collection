@@ -1,6 +1,12 @@
 #lang racket
 
 
+;; If you are seeing spurious exceptions from this file that might actually originate
+;; in your own code, it's probably because this file lacks proper use of
+;; (syntax/loc stx ... ).  However, Braids hasn't been able to produce any
+;; such problems.  "Odd..."
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Procedures needed by syntax-extensions.
 
