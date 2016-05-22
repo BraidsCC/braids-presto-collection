@@ -99,8 +99,7 @@
 ;; e.g.,
 ;;
 ;; (define/provide/contract-out (println str)
-;;   (-> string?  ;str
-;;    void?)
+;;   (-> string?   void?)
 ;;
 ;;   (display str)
 ;;   (newline))
