@@ -1,10 +1,12 @@
-#lang s-exp "rules-lang.rkt"
+#lang s-exp "tricks.rkt"
 
 
 (define/provide-rules test-rules
   ;(display (~a "start posure: " (rules-state-posure-parm) "\n"))
   
   (remember assert (lambda (boo) (cond [(false? boo) (error "assertion failed")])))
+
+  
   
   (remember root-cause #f)
   (remember overridden 'please)

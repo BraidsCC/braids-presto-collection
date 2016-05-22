@@ -1,4 +1,4 @@
-#lang s-exp "rules-lang.rkt"
+#lang s-exp "tricks/tricks.rkt"
 
 
 ;; There are three kinds of values in the game's state we care about.

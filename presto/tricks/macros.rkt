@@ -1,19 +1,19 @@
 #lang racket
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Syntax and implementations for Presto rules language.
+;; Syntax and implementations for tricks, the presto rules language.
 ;;
-;; For a detailed example, see test-rules-lang.rkt.
+;; For a detailed example, see unit-test-rules.rkt.
 ;;
 ;; Any contract errors related to "posures" are most likely due to
-;; misplacing, misnaming, or neglecting to remember a rules-variable. 
+;; misplacing, misnaming, or neglecting to (remember ...) a rules-variable. 
 
 
 (require (for-syntax racket/syntax))
-(require (for-syntax "../braids/util.rkt"))
-(require "../braids/util.rkt")
-(require "../braids/posure.rkt")
-(require "player.rkt")
+(require (for-syntax "../../braids/util.rkt"))
+(require "../../braids/util.rkt")
+(require "../../braids/posure.rkt")
+(require "../player.rkt")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

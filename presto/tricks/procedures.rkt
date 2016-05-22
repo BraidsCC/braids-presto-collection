@@ -1,9 +1,9 @@
 #lang racket
 
-(require "../braids/util.rkt")
-(require "../braids/posure.rkt")
-(require "rules-macros.rkt")
-(require "player.rkt")
+(require "../../braids/util.rkt")
+(require "../../braids/posure.rkt")
+(require "macros.rkt")
+(require "../player.rkt")
 
 
 (define/provide/contract-out (first-game-of-match?)
