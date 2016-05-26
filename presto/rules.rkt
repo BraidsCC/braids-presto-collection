@@ -6,13 +6,17 @@
 ;; Position-evaluation relevant values (pervs) contribute to the game's state
 ;; as it pertains to the (a) position evaluation heuristic.  Those values
 ;; must be available outside whatever closures the rules might export.
+;; Examples:  who is playing, zone contents, counters.  I'd normally
+;; prefer these be in structs, but I want to hold off for now.
 ;;
-;; Game-state values upon which impromptu rules (cards) may rely.
+;; Game-state values upon which impromptu rules (cards) may rely.  we
+;; haven't explored this concept much.
 ;;
 ;; All other values, which usually only have bearing on which questions we
 ;; ask of the next person... and tend to not stick around all that long.
+;; Example:  loop state when asking players if they want to mulligan.
+;; Posures are exceptionally good for this.
 ;;
-;; ... bah, it doesn't matter.  Keep all of them.  It's simpler.
 
 
 

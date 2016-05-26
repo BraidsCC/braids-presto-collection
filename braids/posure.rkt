@@ -20,6 +20,17 @@
                               [parent (or/c posure? null?)]) #:transparent) 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Procedures.
+
+
+;; Returns an empty posure.
+(define/provide/contract-out (make-empty-posure)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  -----------------
+  (-> posure?)
+  (posure (make-hasheq) null))
+
+
 ;; Returns the value for the given symbol in either this or an enclosing posure.
 ;; Throws exn:fail:contract:variable if the symbol is not found or if po is null.
 ;;

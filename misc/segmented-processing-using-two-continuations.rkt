@@ -1,5 +1,19 @@
 #lang racket
 
+(require "../braids/util.rkt")
+
+(define-syntax-case/provide (ask stx)
+  [(_ outside-k question)
+   #'(let ([list-from-outside (let/cc inside-k (outside-k (list inside-k question)))])
+       (set! outside-k (car list-from-outside))  ;; "Leap frog" the external continuation.
+       (cadr list-from-outside))])
+
+(define (choose choice-context-k choice)
+  (if (not (void? choice))
+      (let/cc k (choice-context-k (list k choice)))
+      (call/cc choice-context-k)))
+
+
 ;; Demonstrates a sort of "segmented computation" in a soft-of
 ;; "generator" style.
 ;;
@@ -15,12 +29,10 @@
 ;; produces (#f valueN), indicating that valueN is the final result (but not a
 ;; choice).
 ;;
-(define (order-beverage outside-k)
+(define (order-beverage decider-k)
   (define question '(coffee tea))
   
-  (define list-from-outside (let/cc inside-k (outside-k (list inside-k question))))
-  (set! outside-k (car list-from-outside))  ;; "Leap frog" the external continuation.
-  (define choice1 (cadr list-from-outside))
+  (define choice1 (ask decider-k question))
   
   (display (~a "order-beverage: What kind of " choice1 " would you like?\n"))
   
@@ -28,27 +40,28 @@
         (cond
           [(eq? choice1 'coffee) '(black decaf)]
           [else '(iced hot)]))
-  
-  (set! list-from-outside (let/cc yield-k (outside-k (list yield-k question))))
-  (set! outside-k (car list-from-outside))
-  (define choice2 (cadr list-from-outside))
+
+  (define choice2 (ask decider-k question))
   
   (define beverage-name (~a choice2 " " choice1))
   
   ;; We can't return normally from this procedure, so we store the result in
   ;; one last call to the outside continuation.
-  (outside-k (list #f beverage-name))
-  "unreachable")
+  (decider-k (list #f beverage-name))
+  'unreachable)  ; unless outside-k isn't a continuation... which would be really weird.
 
 
 
-(define first-result (call/cc order-beverage))
+(define first-result (choose order-beverage (void)))
 (define first-inside-k (car first-result))
 (define first-choices (cadr first-result))
 
-(define kafe-result (let/cc k (first-inside-k (list k (car first-choices)))))
+(define kafe-result (choose first-inside-k (car first-choices)))
 (define kafe-inside-k (car kafe-result))
 (define kafe-choices (cadr kafe-result))
 
-(define decaf-result (let/cc k (kafe-inside-k (list k (cadr kafe-choices)))))
+(define decaf-result (choose kafe-inside-k (cadr kafe-choices)))
 decaf-result
+
+;; We could use time-travel to choose tea instead.
+;(define tea-r (choose (car first-result) 'tea))

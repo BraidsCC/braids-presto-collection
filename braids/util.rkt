@@ -1,5 +1,6 @@
 #lang racket
 
+;; Copyright 2016 Braids Constance.  All rights reserved.
 
 ;; If you are seeing spurious exceptions from this file that might actually originate
 ;; in your own code, it's probably because this file lacks proper use of
@@ -9,6 +10,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Macros for macros.
+
+;; Order for these seems important, so they are at the top of the file.
 
 
 ;; Convenience macro for define-syntax with provide.
@@ -28,7 +31,7 @@
 ;;         (set! id val))
 ;;       )]))
 (provide define-syntax/provide)
-(define-syntax (define-syntax/provide dsp-stx)  ;; Needs to be defined first.
+(define-syntax (define-syntax/provide dsp-stx)
   ;;;;;;;;;;;;  ---------------------
   (syntax-case dsp-stx ()
     [(_ (rator stx0) body0 bodyN ...)
@@ -40,7 +43,6 @@
          )]))
 
 
-;; this is EXPERIMENTAL ... and broken.  :(
 ;; Convenience macro for define-syntax containing a syntax-case with a provide form.
 ;;
 ;; Syntax:  
@@ -55,18 +57,18 @@
 ;;        (let ()
 ;;          (set! id val)
 ;;          "You have deviated from the One Truth Path by using set!")))])
-(provide define-syntax-case/provide)
-(define-syntax (define-syntax-case/provide dscmp-stx)
-  ;;;;;;;;;;;;  --------------------------
+(define-syntax/provide (define-syntax-case/provide dscmp-stx)
+  ;;;;;;;;;;;;;;;;;;;;  --------------------------
 
   ;; one macro to rule all macros...
   (syntax-case dscmp-stx ()
     [(_ (rator stx0) match0 matchN ...)
      #`(define-syntax/provide (rator stx0)
-         #,(syntax/loc dscmp-stx  ; use the outer macro's syntax/loc.
+
+         ;; use the outer macro's user's srcloc for exceptions.
+         #,(syntax/loc dscmp-stx  
              (syntax-case stx0 ()
-               match0 matchN ...
-               )))]))
+               match0 matchN ...)))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -86,41 +88,7 @@
        (cons (car first-list) (cddr first-list)))
 
      (cons first-list-sans-second-item 
-                  (omit-second-item-of-each-sublist (cdr ls)))]
-    ))
-
-;; Returns a syntax object that represents the srcloc (source location) of
-;; another (given) syntax object, using the original syntax-context of the
-;; given syntax object.
-(define (syntax->srcloc->syntax-@DEPRECATED stx)
-  ;;;;;  ----------------------------------
-  (datum->syntax stx
-   (srcloc (syntax-source stx)
-           (syntax-line stx)
-           (syntax-column stx)
-           (syntax-position stx)
-           (syntax-span stx))))
-
-;; Despite the name, this doesn't actually mutate the list.
-;;
-(define-for-syntax (truncate-sublists-to-two-items ls)
-  ;;;;;;;;;;;;;;;;  ------------------------------
-  (cond
-    [(eq? '() ls)
-     '()]
-    [else
-     (define first-list (car ls))
-     (define first-list-first-2-only (list (car first-list) (cadr first-list)))
-     
-     (cons first-list-first-2-only
-            (truncate-sublists-to-two-items (cdr ls)))
-     ]
-    ))
-        
-    
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Syntax extensions
+                  (omit-second-item-of-each-sublist (cdr ls)))]))
 
 
 ;; Mutative add1 that returns the resulting number after incrementing.
@@ -183,6 +151,32 @@
          #,(syntax/loc stx
              (define (rator rands ...) body0 bodyN ...)))]
     );/define-syntax d/p/co
+
+
+;; Invokes hash-ref! with the resulting value in tail position.
+;;
+(define/provide/contract-out (hash-ref!/tail hash key value-thunk)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  --------------
+  (-> (and/c hash? (not/c immutable?))  ;hash
+      any/c  ;key
+      (-> any/c)  ;value-thunk
+      any)
+
+  (define computed-value (void))
+
+  ;; computed-value is only mutated if this thunk executes.
+  (define (value-thunk-prime)
+    (set! computed-value (value-thunk)))
+
+  ;; hash-ref! decides whether to execute the thunk.
+  (define hash-ref!-result
+    (hash-ref! hash key value-thunk-prime))
+
+  (if (not (void? computed-value))
+      computed-value
+      hash-ref!-result
+      )
+  );def
 
 
 ;; Combine struct and (provide (struct-out ...)) for structs.
@@ -265,41 +259,38 @@
   );/def
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Constants
+;; Returns a syntax object that represents the srcloc (source location) of
+;; another (given) syntax object, using the original syntax-context of the
+;; given syntax object.
+(define (syntax->srcloc->syntax-@DEPRECATED stx)
+  ;;;;;  ----------------------------------
+  (datum->syntax stx
+   (srcloc (syntax-source stx)
+           (syntax-line stx)
+           (syntax-column stx)
+           (syntax-position stx)
+           (syntax-span stx))))
+
 
 (define/provide the-empty-hash (hash))  ; immutable
 ;;;;;;;;;;;;;;; --------------
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Procedures
-
-
-;; Invokes hash-ref! with the resulting value in tail position.
+;; Despite the name, this doesn't actually mutate the list.
 ;;
-(define/provide/contract-out (hash-ref!/tail hash key value-thunk)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;  --------------
-  (-> (and/c hash? (not/c immutable?))  ;hash
-      any/c  ;key
-      (-> any/c)  ;value-thunk
-      any)
-
-  (define computed-value (void))
-
-  ;; computed-value is only mutated if this thunk executes.
-  (define (value-thunk-prime)
-    (set! computed-value (value-thunk)))
-
-  ;; hash-ref! decides whether to execute the thunk.
-  (define hash-ref!-result
-    (hash-ref! hash key value-thunk-prime))
-
-  (if (not (void? computed-value))
-      computed-value
-      hash-ref!-result
-      )
-  );def
+(define-for-syntax (truncate-sublists-to-two-items ls)
+  ;;;;;;;;;;;;;;;;  ------------------------------
+  (cond
+    [(eq? '() ls)
+     '()]
+    [else
+     (define first-list (car ls))
+     (define first-list-first-2-only (list (car first-list) (cadr first-list)))
+     
+     (cons first-list-first-2-only
+            (truncate-sublists-to-two-items (cdr ls)))
+     ]
+    ))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

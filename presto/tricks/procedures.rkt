@@ -1,5 +1,10 @@
 #lang racket
 
+
+;; These contains only procedures that one would normally use in Tricks rules
+;; definitions.
+
+
 (require "../../braids/util.rkt")
 (require "../../braids/posure.rkt")
 (require "macros.rkt")
@@ -17,6 +22,7 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  -------------------------
   (-> boolean?)
   (false? ($ prior-game-losing-player)))
+
 
 (define/provide/contract-out (random-player)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  -------------
