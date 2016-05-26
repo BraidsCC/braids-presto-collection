@@ -39,6 +39,7 @@
   ;(display (~a "end posure: " (rules-state-posure-parm) "\n"))
 
   (remember question '(house-salad caesar-salad))
-  
-  (ask ($ external-k) player ($ question))
+
+  (for-each-player-in-parallel that-player
+    (ask ($ external-k) ($ that-player) ($ question)))
   );def-rules

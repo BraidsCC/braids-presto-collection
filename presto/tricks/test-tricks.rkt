@@ -3,32 +3,25 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Unit-test code.
 
-;(require racket/control)
-;(require racket/generator)
 (require rackunit)
 (require rackunit/text-ui)
-
 (require "../../braids/util.rkt")
 (require "../../braids/posure.rkt")
 (require "../player.rkt")
-
-;(require "procedures.rkt")
-(require "macros.rkt")
-
+(require "options.rkt")
+(require "tricks.rkt")
 (require "unit-testing-rules.rkt")
 
 
 
-
-
-
 (define-test-suite suite
+  ;;;;;;;;;;;;;;;; -----
     (test-case
      "first-choice"
      (rules-state-posure-parm (make-empty-posure))
 
-     (define player1 (player "Player One" (make-hasheq)))
-     (define player2 (player "Player Two" (make-hasheq)))
+     (define player1 (tricks-player "Player One" (make-hasheq)))
+     (define player2 (tricks-player "Player Two" (make-hasheq)))
 
      (define players (list player1 player2))
 
