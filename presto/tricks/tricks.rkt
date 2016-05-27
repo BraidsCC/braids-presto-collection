@@ -63,36 +63,45 @@
 
 
 
-(define-syntax-case/provide (ask stx)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;  ---
-  [(_ outside-k player question)
-   ;; Build an options struct to get back a decision struct.
-   #'(let
-         ([decision (let/cc inside-k
-                      (outside-k (tricks-options inside-k player question)))])
-       ;; "Leap frog" the external continuation:
-       (cond [(tricks-debug-flag . and . (not (tricks-decision? decision)))
-             (define message (~a "ask: contract violation\n"
-                                 " expected: tricks-decision?\n"
-                                 " given:\n"
-                                 "   decision "))
-             (raise (make-exn:fail:contract message (current-continuation-marks)))])
-             
-       (:= external-k (tricks-decision-controller-k decision))
-       (tricks-decision-choice decision)) ; this is the choice made externally.
-   ])
+;; Build an options struct to get back a decision struct.
+(define/provide/contract-out (ask outside-k player question)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  ---
+  
+  (-> continuation? tricks-player? any/c  any/c)
+  (let
+      ([decision (let/cc inside-k
+                   (outside-k (tricks-options inside-k player question)))])
+    
+    (cond [(tricks-debug-flag . and . (not (tricks-decision? decision)))
+           (define message (~a "ask (via continuation): contract violation\n"
+                               " expected: tricks-decision?\n"
+                               " given:\n"
+                               "   " decision))
+           (raise (make-exn:fail:contract message (current-continuation-marks)))])
+    
+    ;; "Leap frog" the external continuation:
+    (:= external-k (tricks-decision-controller-k decision))
+    (tricks-decision-choice decision)) ; this is the choice made externally.
+  )
 
 
 
-(define/provide/contract-out (choose decision)
+(define/provide/contract-out (choose inside-k player selected-val)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ------
-  (-> tricks-decision?  tricks-options?)
 
-  ;; Counterpart to ask:  use the decision struct to get back an options struct.
-  (define controller-k (tricks-decision-controller-k decision))
-  (define choice (tricks-decision-choice decision))
-  (let/cc k (controller-k decision)))
+  (-> continuation? tricks-player? any/c  tricks-options?)
 
+  ;; Counterpart to ask:  build a decision struct to get the next options struct.
+  (let
+      ([options (let/cc outside-k
+                   (inside-k (tricks-decision outside-k player selected-val)))])
+       (cond [(tricks-debug-flag . and . (not (tricks-options? options)))
+              (define message (~a "choose (via continuation): contract violation\n"
+                                  " expected: tricks-options?\n"
+                                  " given:\n"
+                                  "   " options))
+              (raise (make-exn:fail:contract message (current-continuation-marks)))])
+    options))
   
 
 (define-syntax-case/provide (define/provide-rules stx)

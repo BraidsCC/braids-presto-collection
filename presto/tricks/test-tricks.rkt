@@ -17,17 +17,18 @@
 (define-test-suite suite
   ;;;;;;;;;;;;;;;; -----
     (test-case
-     "first-choice"
+     "first-2-choices"
      (rules-state-posure-parm (make-empty-posure))
 
      (define player1 (tricks-player "Player One" (make-hasheq)))
      (define player2 (tricks-player "Player Two" (make-hasheq)))
-
      (define players (list player1 player2))
 
-     (define options (start-game unit-testing-rules players))
-     
-     (check-equal? (tricks-options-options options) '(house-salad caesar-salad))
+     (define salad-options (start-game unit-testing-rules players))
+     (check-equal? (tricks-options-options salad-options) '(house-salad caesar-salad))
+
+     (define entree-options (choose (tricks-options-rules-k salad-options) player1 'house-salad))
+     (check-equal? (tricks-options-options entree-options) '(beef pork chicken vegetables))
      
      ;; state is in (rules-state-posure-parm).
      "end of test-case")

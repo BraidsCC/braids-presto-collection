@@ -38,8 +38,15 @@
   
   ;(display (~a "end posure: " (rules-state-posure-parm) "\n"))
 
+  (remember old-external-k ($ external-k))
+  
   (remember question '(house-salad caesar-salad))
+  (ask ($ external-k) (car ($ players)) ($ question))
 
-  (for-each-player-in-parallel that-player
-    (ask ($ external-k) ($ that-player) ($ question)))
+  (($ assert) (not (eq? ($ old-external-k) ($ external-k))))
+  
+  (:= question '(beef pork chicken vegetables))
+  (ask ($ external-k) (car ($ players)) ($ question))
+
+
   );def-rules
