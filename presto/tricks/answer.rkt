@@ -7,6 +7,6 @@
 (struct/provide/contract-out tricks-decision
                              ;--------------
                              ([controller-k continuation?]
-                              [player tricks-player?]
+                              [player presto-player?]
                               [choice any/c])
                              #:transparent)

@@ -7,6 +7,6 @@
 (struct/provide/contract-out tricks-question
                              ;--------------
                              ([rules-k continuation?]
-                              [player tricks-player?]
+                              [player presto-player?]
                               [options list?])
                              #:transparent)
