@@ -20,15 +20,21 @@
      "first-2-choices"
      (rules-state-posure-parm (make-empty-posure))
 
-     (define player1 (tricks-player "Player One" (make-hasheq)))
-     (define player2 (tricks-player "Player Two" (make-hasheq)))
+     (define player1 (presto-player "Player One" (make-hasheq)))
+     (define player2 (presto-player "Player Two" (make-hasheq)))
      (define players (list player1 player2))
 
-     (define salad-options (start-game unit-testing-rules players))
-     (check-equal? (tricks-question-options salad-options) '(house-salad caesar-salad))
+     (define salad-options1 (start-game unit-testing-rules players))
+     (check-equal? (tricks-question-options salad-options1) '(house-salad caesar-salad))
+     (check-equal? (tricks-question-player salad-options1) player1)
 
-     (define entree-options (choose (tricks-question-rules-k salad-options) player1 'house-salad))
+     (define salad-options2 (choose-for salad-options1 player1 'caesar-salad))
+     (check-equal? (tricks-question-options salad-options2) '(house-salad caesar-salad))
+     (check-equal? (tricks-question-player salad-options2) player2)
+     
+     (define entree-options (choose-for salad-options2 player2 'house-salad))
      (check-equal? (tricks-question-options entree-options) '(beef pork chicken vegetables))
+     (check-equal? (tricks-question-player entree-options) player1)
      
      ;; state is in (rules-state-posure-parm).
      "end of test-case")
