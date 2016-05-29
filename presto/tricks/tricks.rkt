@@ -30,7 +30,31 @@
 
 
 
-(provide (except-out (all-from-out racket) define set! let letrec require)
+(provide (except-out (all-from-out racket) ;old excepts: define set! let letrec require
+                     box-cas! bytes-copy! bytes-fill! bytes-set!
+                     dict-clear! dict-ref! dict-remove! dict-set!
+                     dict-set*! dict-update! ;racket 6.5 can't find: dynamic-enter!
+                     dynamic-set-field! ;not found: enter!
+                     environment-variables-set!
+                     ;not found: extflvector-set! flvector-set! fxvector-set!
+                     hash-clear! hash-ref! hash-remove! hash-set! hash-set*!
+                     ; not found: hash-union!
+                     hash-update!
+                     namespace-set-variable-value! namespace-undefine-variable!
+                     peek-bytes! ; not found: peek-bytes-avail! peek-bytes-avail*!
+                     peek-string! placeholder-set! plumber-add-flush!
+                     ; not found: plumber-flush-update-handle-remove!
+                     port-count-lines!
+                     read-bytes! read-bytes-avail! read-bytes-avail!*
+                     read-string! set-add! set-box! 
+                     set-clear! set-field! set-intersect!
+                     set-mcar! set-mcdr! set-phantom-bytes!
+                     set-port-next-location! set-remove! set-subtract!
+                     set-symmetric-difference! set-union!
+                     string-copy! string-fill! string-set!
+                     thread-cell-set! ; not found: vector->psuedo-random-generator!
+                     vector-copy! vector-fill! vector-map! vector-set!
+                     vector-set*! vector-set-performance-stats!)
          (all-from-out "../player.rkt"))
 
 
@@ -49,7 +73,8 @@
   [(_ id val)
    (syntax/loc stx  ;; consumer-oriented error reporting
      (posure-mutate-value (rules-state-posure-parm) (quote id) val)
-     )])
+     )
+   ])
 
 
 
@@ -67,7 +92,7 @@
 (define/provide/contract-out (ask outside-k player question)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ---
   
-  (-> continuation? tricks-player? any/c  any/c)
+  (-> continuation? presto-player? any/c  any/c)
   (let
       ([decision (let/cc inside-k
                    (outside-k (tricks-question inside-k player question)))])
@@ -86,22 +111,23 @@
 
 
 
-(define/provide/contract-out (choose inside-k player selected-val)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;  ------
+(define/provide/contract-out (choose-for question-in player selected-val)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  ----------
 
-  (-> continuation? tricks-player? any/c  tricks-question?)
+  (-> tricks-question? presto-player? any/c  tricks-question?)
 
   ;; Counterpart to ask:  build a decision struct to get the next options struct.
-  (let
-      ([options (let/cc outside-k
+  (let*
+      ([inside-k (tricks-question-rules-k question-in)]
+       [question-out (let/cc outside-k
                    (inside-k (tricks-decision outside-k player selected-val)))])
-       (cond [(tricks-debug-flag . and . (not (tricks-question? options)))
+       (cond [(tricks-debug-flag . and . (not (tricks-question? question-out)))
               (define message (~a "choose (via continuation): contract violation\n"
                                   " expected: tricks-question?\n"
                                   " given:\n"
-                                  "   " options))
+                                  "   " question-out))
               (raise (make-exn:fail:contract message (current-continuation-marks)))])
-    options))
+    question-out))
   
 
 (define-syntax-case/provide (define/provide-rules stx)
@@ -115,7 +141,7 @@
      ; =>
      ;; Do not invoke this directly; see start-game:
    #`(define/provide/contract-out (rules-id players external-k)
-       (-> (listof tricks-player?) continuation?  void?)
+       (-> (listof presto-player?) continuation?  void?)
        (remember-section/players/external-k players external-k)
        #,(syntax/loc stx
            (let ()
@@ -190,7 +216,7 @@
 
 (define/provide/contract-out (random-player)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  -------------
-  (-> tricks-player?)
+  (-> presto-player?)
   (car (shuffle ($ players))))
 
 
@@ -206,7 +232,7 @@
 
 (define/provide/contract-out (shuffle! player zone-sym)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  --------
-  (-> tricks-player? symbol?  void?)
+  (-> presto-player? symbol?  void?)
   (set-player-zone! player zone-sym (shuffle (player-zone player zone-sym))))
 
 
@@ -283,7 +309,7 @@
   
 (define (remember-section/players/external-k player-list external-k)
   ;;;;;  -----------------------------------
-  ;(-> (listof tricks-player?) continuation?   any)
+  ;(-> (listof presto-player?) continuation?   any)
   (remember section "root")
   (remember players player-list)
   (remember-symbol 'external-k external-k))
@@ -292,5 +318,5 @@
 
 (define/provide/contract-out (start-game rules players)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ----------
-  (-> procedure? (listof tricks-player?)  tricks-question?)
+  (-> procedure? (listof presto-player?)  tricks-question?)
   (let/cc k (rules players k)))
