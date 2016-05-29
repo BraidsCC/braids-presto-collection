@@ -40,13 +40,15 @@
 
   (remember old-external-k ($ external-k))
   
-  (remember question '(house-salad caesar-salad))
-  (ask ($ external-k) (car ($ players)) ($ question))
+  (remember options '(house-salad caesar-salad))
 
-  (($ assert) (not (eq? ($ old-external-k) ($ external-k))))
+  (for-each-player-in-parallel that-player 
+    (ask ($ external-k) ($ that-player) ($ options))
+    (($ assert) (not (eq? ($ old-external-k) ($ external-k))))
+    (:= old-external-k ($ external-k)))
   
-  (:= question '(beef pork chicken vegetables))
-  (ask ($ external-k) (car ($ players)) ($ question))
+  (:= options '(beef pork chicken vegetables))
+  (ask ($ external-k) (car ($ players)) ($ options))
 
 
   );def-rules
