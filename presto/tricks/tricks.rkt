@@ -15,8 +15,8 @@
 (require "../../braids/util.rkt")
 (require "../../braids/posure.rkt")
 (require "../player.rkt")
-(require "decision.rkt")
-(require "options.rkt")
+(require "question.rkt")
+(require "answer.rkt")
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -70,7 +70,7 @@
   (-> continuation? tricks-player? any/c  any/c)
   (let
       ([decision (let/cc inside-k
-                   (outside-k (tricks-options inside-k player question)))])
+                   (outside-k (tricks-question inside-k player question)))])
     
     (cond [(tricks-debug-flag . and . (not (tricks-decision? decision)))
            (define message (~a "ask (via continuation): contract violation\n"
@@ -89,15 +89,15 @@
 (define/provide/contract-out (choose inside-k player selected-val)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ------
 
-  (-> continuation? tricks-player? any/c  tricks-options?)
+  (-> continuation? tricks-player? any/c  tricks-question?)
 
   ;; Counterpart to ask:  build a decision struct to get the next options struct.
   (let
       ([options (let/cc outside-k
                    (inside-k (tricks-decision outside-k player selected-val)))])
-       (cond [(tricks-debug-flag . and . (not (tricks-options? options)))
+       (cond [(tricks-debug-flag . and . (not (tricks-question? options)))
               (define message (~a "choose (via continuation): contract violation\n"
-                                  " expected: tricks-options?\n"
+                                  " expected: tricks-question?\n"
                                   " given:\n"
                                   "   " options))
               (raise (make-exn:fail:contract message (current-continuation-marks)))])
@@ -292,5 +292,5 @@
 
 (define/provide/contract-out (start-game rules players)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ----------
-  (-> procedure? (listof tricks-player?)  tricks-options?)
+  (-> procedure? (listof tricks-player?)  tricks-question?)
   (let/cc k (rules players k)))

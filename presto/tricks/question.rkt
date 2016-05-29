@@ -4,8 +4,8 @@
 (require "../player.rkt")
 
 
-(struct/provide/contract-out tricks-options
-                             ;-------------
+(struct/provide/contract-out tricks-question
+                             ;--------------
                              ([rules-k continuation?]
                               [player tricks-player?]
                               [options list?])

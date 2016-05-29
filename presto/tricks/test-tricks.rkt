@@ -8,7 +8,7 @@
 (require "../../braids/util.rkt")
 (require "../../braids/posure.rkt")
 (require "../player.rkt")
-(require "options.rkt")
+(require "question.rkt")
 (require "tricks.rkt")
 (require "unit-testing-rules.rkt")
 
@@ -25,10 +25,10 @@
      (define players (list player1 player2))
 
      (define salad-options (start-game unit-testing-rules players))
-     (check-equal? (tricks-options-options salad-options) '(house-salad caesar-salad))
+     (check-equal? (tricks-question-options salad-options) '(house-salad caesar-salad))
 
-     (define entree-options (choose (tricks-options-rules-k salad-options) player1 'house-salad))
-     (check-equal? (tricks-options-options entree-options) '(beef pork chicken vegetables))
+     (define entree-options (choose (tricks-question-rules-k salad-options) player1 'house-salad))
+     (check-equal? (tricks-question-options entree-options) '(beef pork chicken vegetables))
      
      ;; state is in (rules-state-posure-parm).
      "end of test-case")
