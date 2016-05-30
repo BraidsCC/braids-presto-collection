@@ -85,9 +85,11 @@
   (-> presto-player? (or/c list? set?)   any/c)
   ;~~~ add to contract: return value is a member of choices.
 
-  (let ([answer  (ask-proc player choices (controller-k-parm))])
-    (controller-k-parm (tricks-answer-controller-k answer))
-    (tricks-answer-choice answer)))
+  (let* ([controller-k  (controller-k-parm)]
+         [answer  (ask-helper player choices controller-k)])
+    (controller-k-parm (tricks-answer-controller-k answer)) ;set parm
+    (tricks-answer-choice answer) ;return player's choice
+    ))
 
 
 
@@ -121,6 +123,7 @@
    #`(define/provide/contract-out (rules-id players-formal controller-k-formal)
        (-> (listof presto-player?) continuation?   any)
 
+       ; Set parameters.
        (players-parm players-formal)
        (controller-k-parm controller-k-formal)
        (section-stack-parm '(root))
@@ -139,14 +142,14 @@
    ;; The double-nested let here aids error-reporting.
    ;; Errors occurring before and after the inner let, are likely bugs in
    ;; Tricks, which is why we used syntax/loc for the body.
-   #`(let ()
-       (section-stack-parm (cons (quote section-id) (section-stack-parm))) ;push
+   #`(let ([section-stack  (section-stack-parm)])
+       (section-stack-parm (cons (quote section-id) section-stack)) ;push
 
        #,(syntax/loc stx  ;; Transfer error reporting to consumer code.
            (let ()
              body0 bodyN ...))
        
-       (section-stack-parm (cdr (section-stack-parm))) ;pop
+       (section-stack-parm (cdr section-stack)) ;pop
        )])
 
 
@@ -174,8 +177,8 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;  ---------------------------
   [(_ internal-var-id body0 bodyN ...)
      
-   #`(begin
-       (for ([internal-var-id (players-parm)])
+   #`(let ([players (players-parm)])
+       (for ([internal-var-id players])
          #,(syntax/loc stx  ;; Transfer error reporting to consumer code.
              (let ()
                body0 bodyN ...))))])
@@ -236,7 +239,7 @@
 
 
 
-(define (ask-proc player question controller-k)
+(define (ask-helper player question controller-k)
   ;;;;;  --------
   ;(-> presto-player? list? continuation?   tricks-answer?)
 
