@@ -179,6 +179,19 @@
   );def
 
 
+
+;; Returns a predicate that determines whether a specific value is a member of
+;; the given set.
+;;
+(define/provide/contract-out (set-member/c st)
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;  ------------
+  (-> set?   (-> any/c   boolean?))
+
+  (lambda (val)
+    (set-member? st val)))
+
+
+
 ;; Combine struct and (provide (struct-out ...)) for structs.
 ;; Syntax is just like struct (in Racket 6.5).
 ;;
