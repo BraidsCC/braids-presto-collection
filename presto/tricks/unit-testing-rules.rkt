@@ -1,54 +1,48 @@
 #lang s-exp "tricks.rkt"
 
 
-(define/provide-rules (unit-testing-rules players external-k)
-  ;(display (~a "start posure: " (rules-state-posure-parm) "\n"))
-  
-  (remember assert (lambda (boo) (cond [(false? boo) (error "assertion failed")])))
+(define (assert boo message)
+  (cond [(false? boo)
+         (error (~a "assertion failed: " message))]
+        
+        [(not (boolean? boo))
+         (error (~a "not a boolean: " boo " for " message))])
+  (void))
 
-  
-  
-  (remember root-cause #f)
-  (remember overridden 'please)
 
-  (($ assert) (not ($ root-cause)))
-  (($ assert) (eq? ($ overridden) 'please))
 
-  
-  ;(display (~a "pre-one posure: " (rules-state-posure-parm) "\n"))
-  
-  (define-section one
-    (remember onsie 1)
-    (remember overridden 'splat)
-    (:= root-cause "evil")
+(define/provide-rules unit-testing-rules
 
-    (($ assert) (eq? ($ onsie) 1))
-    (($ assert) (eq? ($ overridden) 'splat))
-    (($ assert) (eq? ($ root-cause) "evil"))
+  (define root-cause #f)
+  (define overridden 'please)
 
-    (add1 ($ onsie))
+  (assert (not root-cause) "root cause is false")
+  (assert (eq? overridden 'please) "overridden is 'please")
+
     
-    ;(display (~a "one end posure: " (rules-state-posure-parm) "\n"))
+  (define-section one
+    (define onesie 1)
+    (define overridden 'splat)
+    (set! root-cause "evil")
+    
+    (assert (eq? onesie 1) "onesie is 1")
+    (assert (eq? overridden 'splat) "overridden is 'splat")
+    (assert (eq? root-cause "evil") "root-cause is \"evil\"")
+    
+    (add1 onesie)
+    
     );def-sec
-
-  ;(display (~a "post-one posure: " (rules-state-posure-parm) "\n"))
-
-  (($ assert) (eq? ($ overridden) 'please))
-  (($ assert) (eq? ($ root-cause) "evil"))
   
-  ;(display (~a "end posure: " (rules-state-posure-parm) "\n"))
-
-  (remember old-external-k ($ external-k))
+  (assert (eq? overridden 'please) "overridden is back to being 'please")
+  (assert (eq? root-cause "evil") "root-cause is still \"evil\"")
   
-  (remember options '(house-salad caesar-salad))
-
+  (define options '(house-salad caesar-salad))
+  
   (for-each-player-in-parallel that-player 
-    (ask ($ external-k) ($ that-player) ($ options))
-    (($ assert) (not (eq? ($ old-external-k) ($ external-k))))
-    (:= old-external-k ($ external-k)))
-  
-  (:= options '(beef pork chicken vegetables))
-  (ask ($ external-k) (car ($ players)) ($ options))
+    (ask that-player options))
+    
+  (set! options '(beef pork chicken vegetables))
+  (ask (car (players-parm)) options)
 
 
   );def-rules

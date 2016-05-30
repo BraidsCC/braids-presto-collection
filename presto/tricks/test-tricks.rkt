@@ -6,7 +6,6 @@
 (require rackunit)
 (require rackunit/text-ui)
 (require "../../braids/util.rkt")
-(require "../../braids/posure.rkt")
 (require "../player.rkt")
 (require "question.rkt")
 (require "tricks.rkt")
@@ -18,7 +17,6 @@
   ;;;;;;;;;;;;;;;; -----
     (test-case
      "first-2-choices"
-     (rules-state-posure-parm (make-empty-posure))
 
      (define player1 (presto-player "Player One" (make-hasheq)))
      (define player2 (presto-player "Player Two" (make-hasheq)))
@@ -35,8 +33,7 @@
      (define entree-options (choose-for salad-options2 player2 'house-salad))
      (check-equal? (tricks-question-options entree-options) '(beef pork chicken vegetables))
      (check-equal? (tricks-question-player entree-options) player1)
-     
-     ;; state is in (rules-state-posure-parm).
+
      "end of test-case")
     
     (test-case "the end" "end of test-case"))
