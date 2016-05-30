@@ -82,8 +82,9 @@
 (define/provide/contract-out (ask player choices)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ---  
 
-  (-> presto-player? (or/c list? set?)   any/c)
-  ;~~~ add to contract: return value is a member of choices.
+  (->i ([player presto-player?]
+        [choices set?])
+       [result (choices) (set-member/c choices)])
 
   (let* ([controller-k  (controller-k-parm)]
          [answer  (ask-helper player choices controller-k)])
@@ -131,7 +132,7 @@
        #,(syntax/loc stx
            (let ()
              body0 bodyN ...))
-       (void))])
+       "game ended")])
 
 
 

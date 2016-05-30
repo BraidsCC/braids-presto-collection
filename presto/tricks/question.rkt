@@ -8,5 +8,5 @@
                              ;--------------
                              ([rules-k continuation?]
                               [player presto-player?]
-                              [options list?])
+                              [options set?])
                              #:transparent)

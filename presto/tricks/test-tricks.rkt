@@ -16,22 +16,44 @@
 (define-test-suite suite
   ;;;;;;;;;;;;;;;; -----
     (test-case
-     "first-2-choices"
+     "dinner"
 
-     (define player1 (presto-player "Player One" (make-hasheq)))
-     (define player2 (presto-player "Player Two" (make-hasheq)))
-     (define players (list player1 player2))
+     (define (make-first-choice first-choice) 
+       (define player1 (presto-player "Player One" (make-hasheq)))
+       (define player2 (presto-player "Player Two" (make-hasheq)))
+       (define players (list player1 player2))
+       
+       (define start-options (start-game unit-testing-rules players))
 
-     (define salad-options1 (start-game unit-testing-rules players))
-     (check-equal? (tricks-question-options salad-options1) '(house-salad caesar-salad))
+       (define st (tricks-question-options start-options))
+
+       (check set-member? st first-choice
+              (~a "make-first-choice: not a member of initial choices"))
+       
+       (check-equal? (tricks-question-player start-options) player1)
+
+       (list players (choose-for start-options player1 first-choice)))
+     
+      
+     (define first-choice-result (make-first-choice 'dinner))
+     (define players (car first-choice-result))
+     (define player1 (first players))
+     (define player2 (second players))
+
+     (define salad-set (set 'house-salad 'caesar-salad))
+
+     (define salad-options1 (second first-choice-result))
+     (check-equal? (tricks-question-options salad-options1) salad-set)
      (check-equal? (tricks-question-player salad-options1) player1)
 
      (define salad-options2 (choose-for salad-options1 player1 'caesar-salad))
-     (check-equal? (tricks-question-options salad-options2) '(house-salad caesar-salad))
+     (check-equal? (tricks-question-options salad-options2) salad-set)
      (check-equal? (tricks-question-player salad-options2) player2)
+
+     (define entree-set (set 'beef 'pork 'chicken 'vegetables))
      
      (define entree-options (choose-for salad-options2 player2 'house-salad))
-     (check-equal? (tricks-question-options entree-options) '(beef pork chicken vegetables))
+     (check-equal? (tricks-question-options entree-options) entree-set)
      (check-equal? (tricks-question-player entree-options) player1)
 
      "end of test-case")
