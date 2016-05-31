@@ -183,12 +183,15 @@
 ;; Returns a predicate that determines whether a specific value is a member of
 ;; the given set.
 ;;
-(define/provide/contract-out (set-member/c st)
-  ;;;;;;;;;;;;;;;;;;;;;;;;;;  ------------
-  (-> set?   (-> any/c   boolean?))
+(define/provide (set-member/c st)
+  ;;;;;;;;;;;;;  ------------
 
-  (lambda (val)
-    (set-member? st val)))
+  ;(-> set?   (-> any/c   boolean?))
+
+  (flat-named-contract
+   (~a "member of set " st)
+   (lambda (val)
+     (set-member? st val))))
 
 
 
