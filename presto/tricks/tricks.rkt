@@ -83,7 +83,7 @@
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ---  
 
   (->i ([player presto-player?]
-        [choices set?])
+        [choices (and/c set? (not/c set-empty?))])
        [result (choices) (set-member/c choices)])
 
   (let* ([controller-k  (controller-k-parm)]
