@@ -11,12 +11,18 @@
 
 
 
+(define (ask-in-proc player)
+  (ask player (set 'in-proc)))
+
+
+
 (define/provide-rules unit-testing-rules
   (define player1 (car (players-parm)))
 
   (define first-choice
     (ask player1
-         (set 'ask-bomb-bad-choice 'ask-bomb-empty-set 'dinner 'sections)))
+         (set 'ask-bomb-bad-choice 'ask-bomb-empty-set 'ask-inside-procedure
+              'dinner 'sections)))
 
   (case first-choice
     [(ask-bomb-bad-choice)
@@ -26,6 +32,12 @@
     [(ask-bomb-empty-set)
 
      (ask player1 (set))]
+
+    [(ask-inside-procedure)
+
+     (ask-in-proc player1)
+
+     (ask player1 (set 'in-rules))]
     
     [(dinner)
   

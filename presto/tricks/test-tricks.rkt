@@ -66,6 +66,22 @@
   
   
   (test-case
+   "ask-inside-procedure"
+   
+   (define first-choice-result (make-first-choice 'ask-inside-procedure))
+   (define players (car first-choice-result))
+   (define player1 (first players))
+
+   (define proc-question (second first-choice-result))
+   (check-equal? (tricks-question-options proc-question) (set 'in-proc))
+
+   (define next-question (choose-for proc-question player1 'in-proc))
+   (check-equal? (tricks-question-options next-question) (set 'in-rules))
+   
+   "end of test-case")
+
+
+  (test-case
    "dinner"
    
    (define first-choice-result (make-first-choice 'dinner))
