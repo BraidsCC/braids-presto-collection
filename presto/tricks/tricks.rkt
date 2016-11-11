@@ -93,7 +93,12 @@
     ))
 
 
-
+;; Select an option from a tricks-question.
+;;
+;; This enacts that option and saves the resulting state in a new tricks-question, which represents the next decision point in the rules definition.
+;;
+;; Returns the new tricks-question.
+;;
 (define/provide/contract-out (choose-for question-in player selected-val)
   ;;;;;;;;;;;;;;;;;;;;;;;;;;  ----------
   
